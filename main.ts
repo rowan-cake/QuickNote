@@ -1,134 +1,169 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import {Plugin, TFile, Notice, requestUrl,FileSystemAdapter,normalizePath } from 'obsidian';
+import { spawnSync,spawn, ChildProcessWithoutNullStreams } from 'child_process';
+import * as path from 'path';
+import * as fs from 'fs';
 
-// Remember to rename these classes and interfaces!
 
-interface MyPluginSettings {
-	mySetting: string;
+// Main plugin class. 
+export default class AutoSummaryPlugin extends Plugin {
+  private serverProc: ChildProcessWithoutNullStreams | null = null; // Global varrible so we can kill server on unload
+
+
+  // REQUIRES: Nothing
+  // MODIFIES: The newest note created
+  // EFFECTS : Checks python dependencies, Starts local python server, Listens for a newly created note and then inserts a auto summary into it by calling ".handleNewNote()"
+  async onload() {
+    await this.ensurePythonDependencies();
+    await this.startPythonServer(); //start up the flask server (has the ollama call in it)
+      this.app.workspace.onLayoutReady(() => {
+        this.registerEvent( // Listen for newly created files in the vault
+          this.app.vault.on("create", async (file) => { //on creation of a new TEXT file only
+            if (!(file instanceof TFile) || file.extension !== "md") return; //NOTE TFile is just a wrapper around a .md file so both checks might be unessacry
+            await this.handleNewNote(file); // logic for the insertion into the new note
+          })
+        );
+      });
+  }
+
+
+  // REQUIRES: Nothing
+  // MODIFIES: Server procces
+  // EFFECTS : Kills the local server
+  onunload() {
+    if (this.serverProc) { // Kill the server when plugin is disabled or reloaded
+      this.serverProc.kill();    
+    } 
+  }
+
+  // REQUIRES: Nothing
+  // MODIFIES: Nothing
+  // EFFECTS : Made to resolve the users path to their python(or python3) command. 
+  private resolvePythonPath(): string {
+    const locator = process.platform === 'win32' ? 'where' : 'which';
+    for (const name of ['python3', 'python']) { // First try 'python3', then fallback to 'python'
+      const result = spawnSync(locator, [name], { encoding: 'utf8' });
+      if (result.status === 0) {
+        const fullPath = normalizePath(result.stdout); //normalizePath for cross platform use
+        if (fs.existsSync(fullPath)) {
+          return fullPath;
+        }
+      }
+    }
+    // Last-ditch: assume 'python' on PATH
+    return 'python';
+  }
+
+
+  // REQUIRES: Nothing
+  // MODIFIES: Nothing
+  // EFFECTS : Make's sure that all the nessacary python imports are present (by calling .checkPythonImports())
+  private async ensurePythonDependencies(): Promise<void> {
+    const vaultRoot = (this.app.vault.adapter as FileSystemAdapter).getBasePath();
+    const pluginDir = path.join(vaultRoot, this.app.vault.configDir, 'plugins', this.manifest.id);
+    const py        = this.resolvePythonPath();
+    let ok: boolean;
+    try {
+      ok = await this.checkPythonImports(py, pluginDir);
+    } catch (e) {
+      new Notice('AutoSummary: couldn’t verify Python dependencies');
+      return;
+    }
+    // Notify user if imports aren’t present
+    if (ok) {
+    } else {
+      new Notice('AutoSummary: Missing Python dependencies (flask, ollama)');
+    }
+  }
+
+
+  // REQUIRES: "pyCmd" is a proper python path
+  // MODIFIES: Nothing
+  // EFFECTS : Returns true if flask and ollama are installed on user's machine.
+  private async checkPythonImports(pyCmd: string, cwd: string): Promise<boolean> {
+    try {
+      // Spawn a short-lived Python process to test the imports
+      const code = await new Promise<number>((resolve, reject) => {
+      const tester = spawn(pyCmd, ['-c', 'import flask, ollama'], { cwd });
+      tester.once('error', reject);
+      tester.once('close', (c) => resolve(c ?? 1)); // treat null as failure
+      });
+      // code === 0 means both imports succeeded
+      return code === 0;
+    }
+    catch (e) {
+      return false;
+    }
+  }
+  
+
+  // REQUIRES: Python imports to be resolved.
+  // MODIFIES: Nothing
+  // EFFECTS : Starts the local flask python server. 
+  private startPythonServer(): Promise<void> {
+    const vaultRoot = (this.app.vault.adapter as FileSystemAdapter).getBasePath(); // path to vault
+    const pluginDir = path.join(
+      vaultRoot,
+      this.app.vault.configDir,  // ".obsidian" config and packages directory
+      "plugins",
+      this.manifest.id //AI-QuickNote
+    );
+    const serverPath = path.join(pluginDir, "backend_py", "server.py");
+
+    const pythonCmd = this.resolvePythonPath(); // Get the path to python.exe
+    
+    // Quick sanity check
+    if (!require('fs').existsSync(serverPath)) {
+     return Promise.reject(new Error(`server.py not found at ${serverPath}`));
+   }
+
+    return new Promise((resolve, reject) => {
+    this.serverProc = spawn(pythonCmd, [serverPath], { cwd: pluginDir });
+
+    // If spawning fails outright
+    this.serverProc.on('error', (err) => reject(err));
+
+    // Watch stdout — as soon as we see either key banner line, resolve
+    this.serverProc.stdout.on('data', (chunk) => {
+      const line = chunk.toString().trim();
+      
+      // resolve on either of these marks of "server up"
+      if (
+        line.includes('Serving Flask app') ||
+        line.includes('Running on')
+      ) {
+        resolve();
+      }
+    });
+    // If the process dies first, reject
+    this.serverProc.on('close', (code) => {
+      reject(new Error(`Flask exited early with code ${code}`));
+    });
+   });
+  }
+
+  
+  // REQUIRES: "File" is named something that can be interpeted as a keyword, nothing else already running on "127.0.0.1:5000"
+  // MODIFIES: "File"
+  // EFFECTS : Make a request to the python local server asking for summary, then insert that summary into the "File"
+  async handleNewNote(file: TFile) {
+    const keyword = file.basename; // Use the note's filename (without extension) as the summary topic
+    try {      
+      // Use Obsidian’s requestUrl() here instead of fetch() , (use the local host of IPv4)
+      const url = `http://127.0.0.1:5000/generate_summary?keyword=${encodeURIComponent(keyword)}&model=default`; // 2. Pass the `keyword` and `model` to the server.py file 
+      const response = await requestUrl({ url, method: 'GET' }); 
+      // Check HTTP status
+      if (response.status !== 200) { //if they are different types or different values it will return true and therefore throw the error.
+        throw new Error(`Server returned ${response.status}`);
+      }
+      // Retrive the data.
+      const data = response.json as { summary: string }; //Flask's `jsonify()` on the backend turns the summary into a JSON object.
+      const summary = data.summary; //pull out the `summary` field from the json object.      
+      const snippet = `- ==Def== :${summary} \n ---\n`; // heres the new text to be inserted
+      await this.app.vault.process(file, (data) => {return snippet;}); // fills the file with the new text(in the backround as specifeid in the docs)
+      new Notice("AutoSummary: summary inserted!!!");
+    } catch (e) {
+      new Notice("AutoSummary: failed to insert summary.");
+    }
+  } 
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
-
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
-
-	async onload() {
-		await this.loadSettings();
-
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-	}
-
-	onunload() {
-
-	}
-
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
-
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
-}
-
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const {containerEl} = this;
-
-		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
-	}
-}
