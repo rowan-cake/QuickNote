@@ -1,11 +1,10 @@
 {
-	"id": "QuickNote",
+	"id": "quick-note",
 	"name": "QuickNote",
 	"version": "1.0.0",
 	"minAppVersion": "1.8.10",
 	"description": "Use ollama with flask to make quick auto insertions of keyword's into a note in your vault.",
 	"author": "Rowan Cake",
 	"authorUrl": "https://github.com/rowan-cake",
-	"fundingUrl": "https://obsidian.md/pricing",
 	"isDesktopOnly": true
 }
