@@ -1,11 +1,11 @@
-import {Plugin, TFile, Notice, requestUrl,FileSystemAdapter,normalizePath } from 'obsidian';
+import {Plugin, TFile, Notice, requestUrl,FileSystemAdapter,normalizePath, Platform  } from 'obsidian';
 import { spawnSync,spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 
 
 // Main plugin class. 
-export default class AutoSummaryPlugin extends Plugin {
+export default class QuickNotePlugin extends Plugin {
   private serverProc: ChildProcessWithoutNullStreams | null = null; // Global varrible so we can kill server on unload
 
 
@@ -39,7 +39,7 @@ export default class AutoSummaryPlugin extends Plugin {
   // MODIFIES: Nothing
   // EFFECTS : Made to resolve the users path to their python(or python3) command. 
   private resolvePythonPath(): string {
-    const locator = process.platform === 'win32' ? 'where' : 'which';
+    const locator = Platform.isWin ? 'where' : 'which'; //Fixed to use "Platform"
     for (const name of ['python3', 'python']) { // First try 'python3', then fallback to 'python'
       const result = spawnSync(locator, [name], { encoding: 'utf8' });
       if (result.status === 0) {
@@ -58,20 +58,25 @@ export default class AutoSummaryPlugin extends Plugin {
   // MODIFIES: Nothing
   // EFFECTS : Make's sure that all the nessacary python imports are present (by calling .checkPythonImports())
   private async ensurePythonDependencies(): Promise<void> {
-    const vaultRoot = (this.app.vault.adapter as FileSystemAdapter).getBasePath();
+    const vaultAdapter = this.app.vault.adapter;
+    if(!(vaultAdapter instanceof FileSystemAdapter)){ // instaceof Check
+      new Notice('QuickNote: Cannot determine vault path');
+      return
+    }
+    const vaultRoot = vaultAdapter.getBasePath();
     const pluginDir = path.join(vaultRoot, this.app.vault.configDir, 'plugins', this.manifest.id);
     const py        = this.resolvePythonPath();
     let ok: boolean;
     try {
       ok = await this.checkPythonImports(py, pluginDir);
     } catch (e) {
-      new Notice('AutoSummary: couldn’t verify Python dependencies');
+      new Notice('QuickNote: couldn’t verify Python dependencies');
       return;
     }
     // Notify user if imports aren’t present
     if (ok) {
     } else {
-      new Notice('AutoSummary: Missing Python dependencies (flask, ollama)');
+      new Notice('QuickNote: Missing Python dependencies (flask, ollama)');
     }
   }
 
@@ -160,9 +165,9 @@ export default class AutoSummaryPlugin extends Plugin {
       const summary = data.summary; //pull out the `summary` field from the json object.      
       const snippet = `- ==Def== :${summary} \n ---\n`; // heres the new text to be inserted
       await this.app.vault.process(file, (data) => {return snippet;}); // fills the file with the new text(in the backround as specifeid in the docs)
-      new Notice("AutoSummary: summary inserted!!!");
+      new Notice("QuickNote: summary inserted!!!");
     } catch (e) {
-      new Notice("AutoSummary: failed to insert summary.");
+      new Notice("QuickNote: failed to insert summary.");
     }
   } 
 }
