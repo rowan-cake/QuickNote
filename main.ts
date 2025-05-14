@@ -15,14 +15,15 @@ export default class QuickNotePlugin extends Plugin {
   async onload() {
     await this.ensurePythonDependencies();
     await this.startPythonServer(); //start up the flask server (has the ollama call in it)
-      this.app.workspace.onLayoutReady(() => {
-        this.registerEvent( // Listen for newly created files in the vault
-          this.app.vault.on("create", async (file) => { //on creation of a new TEXT file only
-            if (!(file instanceof TFile) || file.extension !== "md") return; //NOTE TFile is just a wrapper around a .md file so both checks might be unessacry
+    console.log("QuickNote Loaded")  
+    this.app.workspace.onLayoutReady(() => {
+      this.registerEvent( // Listen for newly created files in the vault
+        this.app.vault.on("create", async (file) => { //on creation of a new TEXT file only
+          if (!(file instanceof TFile) || file.extension !== "md") return; //NOTE TFile is just a wrapper around a .md file so both checks might be unessacry
             await this.handleNewNote(file); // logic for the insertion into the new note
           })
-        );
-      });
+      );
+    });
   }
 
 
@@ -42,15 +43,15 @@ export default class QuickNotePlugin extends Plugin {
     const locator = Platform.isWin ? 'where' : 'which'; //Fixed to use "Platform"
     for (const name of ['python3', 'python']) { // First try 'python3', then fallback to 'python'
       const result = spawnSync(locator, [name], { encoding: 'utf8' });
-      if (result.status === 0) {
+      if (result.status == 0) {
         const fullPath = normalizePath(result.stdout); //normalizePath for cross platform use
         if (fs.existsSync(fullPath)) {
           return fullPath;
         }
       }
     }
-    // Last-ditch: assume 'python' on PATH
-    return 'python';
+    // Last-ditch: assume 'python3' on PATH
+    return 'python3';
   }
 
 
@@ -70,12 +71,13 @@ export default class QuickNotePlugin extends Plugin {
     try {
       ok = await this.checkPythonImports(py, pluginDir);
     } catch (e) {
-      new Notice('QuickNote: couldn’t verify Python dependencies');
+      new Notice('QuickNote: couldn’t verify Python dependencies (flask, ollama)');
       return;
     }
     // Notify user if imports aren’t present
     if (ok) {
     } else {
+      console.log(ok)
       new Notice('QuickNote: Missing Python dependencies (flask, ollama)');
     }
   }
@@ -96,8 +98,12 @@ export default class QuickNotePlugin extends Plugin {
       return code === 0;
     }
     catch (e) {
-      return false;
-    }
+      if(e.code == 'ENOENT')
+        return true; // suppres the error is because MAC doesnt have acceses to all the python imports on your sysytem
+      else
+        return false;
+
+    } 
   }
   
 
@@ -110,10 +116,9 @@ export default class QuickNotePlugin extends Plugin {
       vaultRoot,
       this.app.vault.configDir,  // ".obsidian" config and packages directory
       "plugins",
-      this.manifest.id //AI-QuickNote
+      this.manifest.name //QuickNote
     );
     const serverPath = path.join(pluginDir, "backend_py", "server.py");
-
     const pythonCmd = this.resolvePythonPath(); // Get the path to python.exe
     
     // Quick sanity check
