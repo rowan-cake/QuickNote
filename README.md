@@ -14,5 +14,7 @@ Once loaded **QuickNote** creates a local server that has llama3.2 running in ba
 
 ### Example:
 
-[[lagrange multipliers]] ... -> "- ==Def== Lagrange Multipliers is a method used to find local maxima/minima of a function subject to constraints. It involves introducing a new variable (lambda) to balance the function with its constraint, ensuring an extremum point satisfies both conditions simultaneously. Example: Find maximum value of f(x,y) = x^2 + y^2 under constraint g(x,y) = x+y-1. "
+<video src="res/demo.mp4" controls width="600">
+  Your browser does not support the video tag.
+</video>
 
