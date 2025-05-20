@@ -2,7 +2,7 @@
 
 
 ### Use case:
-The main usecase for this plugin was to speed up my notetaking capabilitys in university classes where there are a lot of keywords coming at you quickly and you might not have a lot of time inbetween to write each induviualy.
+The main usecase for this plugin was to speed up my notetaking capabilitys in university classes. Where there are a lot of keywords coming at you quickly and you might not have a lot of time inbetween to write each about each induviualy, and upon review find yourself with just the word left and no explanation around it.
 
 ### Dependecies:
   - Python
