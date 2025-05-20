@@ -14,7 +14,5 @@ Once loaded **QuickNote** creates a local server that has llama3.2 running in ba
 
 ### Example:
 
-<video src="res/demo.mp4" controls width="600">
-  Your browser does not support the video tag.
-</video>
+<img src="res/demo.gif" alt="Demo" width="600"/>
 
