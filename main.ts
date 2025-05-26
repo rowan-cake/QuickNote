@@ -157,6 +157,11 @@ export default class QuickNotePlugin extends Plugin {
   // EFFECTS : Make a request to the python local server asking for summary, then insert that summary into the "File"
   async handleNewNote(file: TFile) {
     const keyword = file.basename; // Use the note's filename (without extension) as the summary topic
+    
+    if(keyword.contains("Untitled")){ //dont make a summary in this case
+      return
+    }
+
     try {      
       // Use Obsidian’s requestUrl() here instead of fetch() , (use the local host of IPv4)
       const url = `http://127.0.0.1:5000/generate_summary?keyword=${encodeURIComponent(keyword)}&model=default`; // 2. Pass the `keyword` and `model` to the server.py file 
