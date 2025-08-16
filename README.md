@@ -2,7 +2,7 @@
 
 
 ### Use case:
-The main use case for this plugin was to speed up my notetaking capabilities in university classes. Often there are a lot of keywords coming at you quickly and you might not have a lot of time in between to write each about each individually, and upon review find yourself with just the word left and no explanation around it.
+The main use case for this plugin was to speed up my notetaking capabilities in university classes. Often there are a lot of keywords coming at you quickly and you might not have a lot of time in between to write each about each individually, and upon review find yourself with just the word left and no explanation around it. This plugin is a solution to that problem, it auto inserts a text summary written by llama 3.2 into the top of the newly created note. So upon note reviews you will atleast have some context surrounding that keyword.  
 
 ### Dependecies:
   - Python
